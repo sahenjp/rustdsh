@@ -137,6 +137,166 @@ $("diagnostics-refresh").onclick = async () => {
     $("diagnostics-refresh").disabled = false;
   }
 };
+function renderRunDiagnostics(report) {
+  const target = $("run-diagnostics-result");
+  const classNames = {
+    active: "活動を観測",
+    api_wait_possible: "応答待ちの可能性",
+    stall_suspected: "停滞の疑い（未確定）",
+    resource_wait: "資源待ち",
+    process_exited: "プロセス終了を観測",
+    waiting_human: "人の確認待ち",
+    succeeded: "完了記録",
+    failed: "失敗記録",
+    insufficient_evidence: "根拠不足・状態未確認",
+  };
+  const signalNames = {
+    process: "プロセス",
+    agent_activity: "ACP活動heartbeat",
+    api_wait: "応答要求",
+    resource_wait: "資源待ち",
+    cpu_activity: "CPU活動",
+    gpu_activity: "GPU活動",
+    browser_connection: "ブラウザー接続",
+  };
+  const statusNames = {
+    alive: "稼働を観測",
+    exit_confirmed: "終了を確認",
+    absence_observed: "不在を観測",
+    gone: "終了を観測",
+    pid_reused: "PID再利用を観測",
+    unknown: "未確認",
+    recent: "最近の活動あり",
+    delayed: "heartbeat遅延",
+    unverified: "時刻を検証できず",
+    unavailable: "取得できず",
+    request_pending: "送信応答待ち（推定）",
+    not_observed: "待機なし／未報告",
+    waiting: "待機中",
+    available: "利用可能",
+    connected: "接続中",
+    disconnected: "切断を観測",
+  };
+  const basisNames = {
+    measured: "実測・記録",
+    inferred: "推定",
+    unavailable: "欠測",
+    unknown: "未確認",
+  };
+  const reasonNames = {
+    recorded_terminal_result: "run履歴に終端結果が記録されています",
+    owned_process_exit_observed: "所有プロセスの終了を観測しました",
+    run_recorded_waiting_for_resource: "run状態が資源待ちです",
+    explicit_resource_wait_observed: "資源providerが待機を報告しました",
+    resource_observation_conflicts_with_run_state: "run状態と資源providerの観測が一致しません",
+    run_recorded_waiting_for_human: "run状態が人の確認待ちです",
+    recent_acp_activity_heartbeat: "ACPから最近の活動通知を受けています",
+    send_command_pending_without_recent_activity: "送信要求が未完了で、最近のACP活動がありません",
+    long_pending_send_without_recent_activity: "送信要求とプロセスは残っていますが、活動heartbeatが長時間ありません",
+    browser_disconnected_run_health_unconfirmed: "ブラウザー切断だけではrun状態を判定できません",
+    independent_activity_or_resource_observation_missing: "活動や資源の独立した観測がありません",
+  };
+  const recommendationNames = {
+    reconnect_dashboard: "ダッシュボードへ再接続する",
+    inspect_resource_readiness: "待機中の資源・leaseを確認する",
+    check_provider_and_cli_status: "provider/APIとCLIの状態を確認する",
+    collect_another_observation: "時間を置いて追加観測する",
+    collect_process_and_activity_observations: "プロセスとACP heartbeatを再確認する",
+    review_recorded_run_state: "記録済みのrun状態を確認する",
+  };
+  const when = (value) =>
+    value && Number.isFinite(Date.parse(value))
+      ? new Date(value).toLocaleString("ja-JP")
+      : "未取得";
+  const age = (value) =>
+    value === null || value === undefined
+      ? "経過時間未計測"
+      : value < 60000
+        ? `${Math.floor(value / 1000)}秒前`
+        : `${Math.floor(value / 60000)}分前`;
+  const cards = (report.runs || []).map((run) => {
+    const diagnosis = run.stall_diagnosis;
+    const classification =
+      classNames[diagnosis.classification] || diagnosis.classification;
+    const article = node("article", undefined, "event");
+    article.append(
+      node("strong", `${run.run_id} · ${classification}`),
+      node(
+        "p",
+        [
+          `記録状態 ${run.recorded_state}`,
+          `根拠 ${basisNames[diagnosis.confidence] || diagnosis.confidence}`,
+          reasonNames[diagnosis.reason] || diagnosis.reason,
+        ].join(" · "),
+      ),
+      node(
+        "p",
+        `観測時刻 ${when(diagnosis.observed_at)} · 自動停止なし`,
+      ),
+    );
+    const evidence = node("ul");
+    for (const signal of diagnosis.signals) {
+      const signalName = signalNames[signal.name] || signal.name;
+      const signalStatus = statusNames[signal.status] || signal.status;
+      const detail = [
+        `${signalName}: ${signalStatus}`,
+        basisNames[signal.basis] || signal.basis,
+        signal.resource_kind ? `種別 ${signal.resource_kind}` : null,
+        signal.age_ms === undefined ? null : age(signal.age_ms),
+        `観測 ${when(signal.observed_at)}`,
+        `確認 ${when(signal.checked_at)}`,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      evidence.append(node("li", detail));
+    }
+    article.append(evidence);
+    const next = (diagnosis.recommendations || [])
+      .map((item) => recommendationNames[item] || item)
+      .join(" · ");
+    article.append(
+      node("p", `次の確認: ${next || "追加操作は不要です"}`),
+    );
+    if (diagnosis.limitations?.length)
+      article.append(
+        node(
+          "p",
+          `未確認: ${diagnosis.limitations.join(" · ")}`,
+          "sub",
+        ),
+      );
+    return article;
+  });
+  target.replaceChildren(
+    ...(cards.length ? cards : [node("p", "run履歴がありません。", "sub")]),
+  );
+}
+$("run-diagnostics-refresh").onclick = async () => {
+  $("run-diagnostics-refresh").disabled = true;
+  $("run-diagnostics-status").textContent = "プロセスとrun履歴を確認中…";
+  try {
+    const report = await api("run-diagnostics");
+    renderRunDiagnostics(report);
+    const statusDetails = [
+      report.recovery_required ? "履歴の末尾が未確定" : null,
+      report.observation_store_status === "unavailable"
+        ? "活動観測の保存内容を確認できません"
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    $("run-diagnostics-status").textContent =
+      `直近 ${report.runs.length} run · 観測 ${new Date(
+        report.observed_at,
+      ).toLocaleString("ja-JP")}${statusDetails ? ` · ${statusDetails}` : ""}`;
+  } catch (error) {
+    $("run-diagnostics-status").textContent =
+      `診断を取得できません: ${error.message}`;
+    $("run-diagnostics-result").replaceChildren();
+  } finally {
+    $("run-diagnostics-refresh").disabled = false;
+  }
+};
 const renderInstructions = createInstructionPanel($("instruction-panel"), {
   node,
   api,

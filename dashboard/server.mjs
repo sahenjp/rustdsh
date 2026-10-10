@@ -21,6 +21,7 @@ import {
   connectionReport,
   inspectTunnel,
 } from "./connection-diagnostics.mjs";
+import { RunHistory } from "./run-history.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const equal = (a, b) =>
@@ -548,6 +549,20 @@ export async function startDashboard(options) {
         route === "/api/diagnostics"
       )
         return json(res, 200, await diagnostics());
+      if (
+        kind === "project" &&
+        req.method === "GET" &&
+        route === "/api/run-diagnostics"
+      ) {
+        const history = new RunHistory(project);
+        return json(
+          res,
+          200,
+          await history.diagnoseRecent({
+            uiConnection: humanAuthorized ? "connected" : "unknown",
+          }),
+        );
+      }
       if (req.method === "GET" && route === "/api/config")
         return json(res, 200, {
           kind,

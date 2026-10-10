@@ -14,6 +14,7 @@ import { startDashboard } from "../server.mjs";
 import { checkPortConfig } from "../tailscale.mjs";
 import { feedbackSince } from "../mcp.mjs";
 import { proxyHarness } from "../harness.mjs";
+import { RunHistory } from "../run-history.mjs";
 
 async function freePort() {
   const server = net.createServer();
@@ -174,11 +175,33 @@ test("project state, HTTP/stdio MCP, subscriptions, answers, and auth work toget
   assert.equal(rebindingStatus, 403);
   const browserToken = new URL(runtime.browser_url).hash.slice("#key=".length);
   const browserHeaders = { "x-rdsh-browser-token": browserToken };
+  const runHistory = await RunHistory.open(alpha);
+  const sampleRunId = "run_00000000-0000-4000-8000-000000000001";
+  await runHistory.register(sampleRunId, "fixture-session-private");
+  assert.equal(
+    (await fetch(dashboard.localUrl + "api/run-diagnostics")).status,
+    401,
+  );
+  const runDiagnostics = await fetch(dashboard.localUrl + "api/run-diagnostics", {
+    headers: browserHeaders,
+  });
+  assert.equal(runDiagnostics.status, 200);
+  const runReport = await runDiagnostics.json();
+  assert.equal(runReport.schema, 1);
+  assert.ok(Number.isFinite(Date.parse(runReport.observed_at)));
+  assert.equal(runReport.runs.length, 1);
+  assert.equal(runReport.runs[0].run_id, sampleRunId);
+  assert.equal(
+    runReport.runs[0].stall_diagnosis.classification,
+    "insufficient_evidence",
+  );
+  assert.equal(Object.hasOwn(runReport.runs[0], "native_session_id"), false);
   const bootstrap = await fetch(runtime.browser_url);
   assert.equal(bootstrap.status, 200);
   assert.equal(bootstrap.headers.get("set-cookie"), null);
   const html = await bootstrap.text();
   assert.match(html, /未回答の質問/);
+  assert.match(html, /run-diagnostics-refresh/);
   assert.equal(
     (await fetch(dashboard.localUrl + "api/qr.svg", { headers })).status,
     409,

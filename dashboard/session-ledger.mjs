@@ -546,9 +546,10 @@ export async function attachRecordedSession({
   let processBound = false;
   const exitWrites = {
     pending: [],
+    activityPending: new Set(),
     error: null,
     async flush() {
-      await Promise.all(this.pending);
+      await Promise.all([...this.pending, ...this.activityPending]);
     },
   };
   let adapter;
@@ -597,7 +598,35 @@ export async function attachRecordedSession({
       }
     };
   }
+  let lastActivityAt = 0;
+  let trackedSessionId = null;
+  const activityKinds = {
+    agent_message_chunk: "agent_message",
+    tool_call: "tool_call",
+    tool_call_update: "tool_update",
+    usage_update: "usage",
+    plan: "plan",
+    current_mode_update: "mode",
+  };
   adapter.on("event", (event) => {
+    if (
+      event.type === "session_update" &&
+      event.session_id === trackedSessionId
+    ) {
+      const updateType = event.update?.sessionUpdate;
+      const kind = activityKinds[updateType] || "other";
+      const now = Date.now();
+      if (now - lastActivityAt >= 60000) {
+        lastActivityAt = now;
+        const write = history
+          .recordActivity(record.run_id, kind)
+          .catch((error) => {
+            exitWrites.error ||= error;
+          });
+        exitWrites.activityPending.add(write);
+        void write.finally(() => exitWrites.activityPending.delete(write));
+      }
+    }
     if (event.type === "process_exit" && budgetGuard)
       exitWrites.pending.push(
         budgetGuard.close().catch((error) => {
@@ -623,6 +652,7 @@ export async function attachRecordedSession({
       run_id === null
         ? await adapter.start()
         : await adapter.resume(record.cli_session_id);
+    trackedSessionId = attached.session_id;
     await history.bindSession(record.run_id, attached.session_id);
     if (budgetGuard) adapter.nativeBudgetGuard = await budgetGuard.ready();
     await history.commandPhase(commandId, "acknowledged", "session_attached");

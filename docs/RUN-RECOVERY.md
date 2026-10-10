@@ -57,6 +57,31 @@ defaults to `unknown`. Browser disconnection is never a run transition. This
 change adds no browser run-control UI and does not claim a physical phone test.
 An invalid transition is refused and its reason/event ID remain in the journal.
 
+## Read-only stall diagnostics
+
+`run-history inspect` includes `stall_diagnosis`. The project dashboard's
+「実行の停滞診断」 panel reads the latest five run records on demand. It combines
+owned-process observations, the recorded run state, an in-flight `send` command,
+and metadata-only ACP activity heartbeats. ACP update names are allowlisted and
+coalesced to at most one observation per minute; message, tool, and prompt
+contents are never copied into storage. The latest activity and resource
+observations live in a bounded companion file, written atomically under the run
+history writer lock, so the schema-1 event journal remains readable by older
+builds. A corrupt companion file makes these signals unavailable without
+blocking run-history reads. A heartbeat is considered recent for 90 seconds to
+allow for that sampling interval. Resource providers may record a resource
+kind and wait state; a resource kind is shown only when a provider explicitly
+reported it.
+
+Recent ACP activity is measured from its recorded timestamp. A dispatched send
+with a live process and no recent heartbeat is labeled `api_wait_possible`; after
+five minutes it becomes `stall_suspected`. That is an inference, not a confirmed
+failure. The output includes each source, observation time, elapsed age, and
+confidence. CPU, GPU, and stdout counters are currently unavailable and are shown
+as missing, never as zero. A resource wait, human wait, process exit, or browser
+disconnect remains a distinct observation. No diagnosis sends a signal, kills or
+restarts a process, or replays a prompt.
+
 ## Requests, responses and uncertainty
 
 Start, resume, send, interrupt and stop receive unique `command_id` values.

@@ -816,6 +816,17 @@
           </dl>
           <ul id="overview-pending"></ul>
         </section>
+        <section class="summary-card" aria-labelledby="run-diagnostics-heading">
+          <h2 id="run-diagnostics-heading">実行の停滞診断</h2>
+          <p class="sub">
+            プロセス、ACP活動、待機状態を分けて表示します。未取得のCPU/GPU値はゼロ扱いせず、停滞の疑いでも自動停止しません。
+          </p>
+          <button id="run-diagnostics-refresh">実行を診断</button>
+          <p id="run-diagnostics-status" role="status" aria-live="polite">
+            診断は未取得です。
+          </p>
+          <div id="run-diagnostics-result" class="feed"></div>
+        </section>
         <h2 id="pending-heading" tabindex="-1">未回答の質問</h2>
         <p class="sub" id="pending-note">
           プロジェクト全体の質問です。回答はこの質問への返答のみです。対象・条件が変わった場合は回答前に内容を再確認してください。回答しただけで実行権限は生まれません。
